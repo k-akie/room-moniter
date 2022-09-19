@@ -1,5 +1,7 @@
 import functions_framework
 
+from google.cloud import firestore
+
 
 @functions_framework.http
 def hello_http(request):
@@ -14,13 +16,19 @@ def hello_http(request):
    """
     request_json = request.get_json(silent=True)
     print(request_json)
-    request_args = request.args
-    print(request_args)
 
-    if request_json and 'name' in request_json:
-        name = request_json['name']
-    elif request_args and 'name' in request_args:
-        name = request_args['name']
-    else:
-        name = 'World'
-    return 'Hello {}!'.format(name)
+    db = firestore.Client()
+    new_data = db.collection('room-monitor').document()
+    result = new_data.set(
+        {
+            'createdAt': firestore.SERVER_TIMESTAMP,
+            'temperature': request_json['temperature'],  # 温度(*C)
+            'pressure': request_json['pressure'],  # 気圧(hPa)
+            'humidity': request_json['humidity'],  # 湿度(%)
+            'gas_resistance': request_json['gas_resistance'],  # (KOhms)
+            'elevation': request_json['elevation']  # 標高(m)
+        }
+    )
+    print(str(result.update_time))
+
+    return 'OK {}'.format(result.update_time)
