@@ -1,6 +1,8 @@
-import functions_framework
+import datetime
+import os
 
-from google.cloud import firestore
+import functions_framework
+from google.cloud import bigquery
 
 
 @functions_framework.http
@@ -15,20 +17,25 @@ def hello_http(request):
        <https://flask.palletsprojects.com/en/1.1.x/api/#flask.make_response>.
    """
     request_json = request.get_json(silent=True)
-    print(request_json)
+    dt_now_iso = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat()
+    print(request_json, dt_now_iso)
 
-    db = firestore.Client()
-    new_data = db.collection('room-monitor').document()
-    result = new_data.set(
-        {
-            'createdAt': firestore.SERVER_TIMESTAMP,
-            'temperature': request_json['temperature'],  # 温度(*C)
-            'pressure': request_json['pressure'],  # 気圧(hPa)
-            'humidity': request_json['humidity'],  # 湿度(%)
-            'gas_resistance': request_json['gas_resistance'],  # (KOhms)
-            'elevation': request_json['elevation']  # 標高(m)
-        }
-    )
-    print(str(result.update_time))
+    rows_to_insert = [{
+        'createdAt': dt_now_iso,
+        'temperature': request_json['temperature'],  # 温度(*C)
+        'pressure': request_json['pressure'],  # 気圧(hPa)
+        'humidity': request_json['humidity'],  # 湿度(%)
+        'gas_resistance': request_json['gas_resistance'],  # (KOhms)
+        'elevation': request_json['elevation']  # 標高(m)
+    }]
 
-    return 'OK {}'.format(result.update_time)
+    table_id = os.environ.get('BIGQUERY_TABLE_ID', 'Specified environment variable is not set.')
+
+    client = bigquery.Client()
+    table = client.get_table(table_id)
+    errors = client.insert_rows(table, rows_to_insert)
+    if errors:
+        print("Encountered errors while inserting rows: {}".format(errors))
+        return 'NG {}'.format(dt_now_iso)
+
+    return 'OK {}'.format(dt_now_iso)
