@@ -3,14 +3,13 @@ import logging
 import os
 
 from flask import Request
-from google.cloud import bigquery
+from google.cloud import firestore
 from slack_bolt import App, Ack, Respond
 from slack_bolt.adapter.google_cloud_functions import SlackRequestHandler
 from slack_sdk.web import WebClient
 
 logging.basicConfig(level=logging.ERROR)
 app: App = App(process_before_response=True)
-handler = SlackRequestHandler(app)
 
 
 class Measurements:
@@ -30,7 +29,7 @@ class Measurements:
 
 def make_slack_message(data: Measurements) -> str:
     if not data:
-        return ""
+        return "no data"
 
     jst = datetime.timezone(datetime.timedelta(hours=9), "JST")
 
@@ -58,41 +57,25 @@ def make_slack_message(data: Measurements) -> str:
     return f"{greet}\r{measured_data}"
 
 
-def search_bq(table_id) -> Measurements | None:
-    client = bigquery.Client()
-    query = f"""
-        SELECT createdAt, temperature, humidity, gas_resistance, pressure
-        FROM `{table_id}` 
-        WHERE createdAt > @searchDay
-        ORDER BY createdAt DESC
-        LIMIT 1
-    """
+def search_latest() -> Measurements:
+    db = firestore.Client()
+    latest_data = db.collection('room-monitor').document('latest').get()
+    latest_dict = latest_data.to_dict()
 
-    today_ts = datetime.datetime.combine(datetime.date.today(), datetime.datetime.min.time())
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter(
-            "searchDay", "TIMESTAMP", today_ts
-        )]
+    return Measurements(
+        latest_dict['createdAt'],
+        latest_dict['temperature'],
+        latest_dict['humidity'],
+        latest_dict['pressure'],
+        latest_dict['gas_resistance']
     )
-    query_job = client.query(query, job_config=job_config)
-
-    for row in query_job:
-        return Measurements(
-            row.createdAt,
-            row.temperature,
-            row.humidity,
-            row.pressure,
-            row.gas_resistance
-        )
-    return
 
 
 @app.command("/room-now")
 def command_room_now(ack: Ack, respond: Respond):
     ack()
 
-    table_id = os.environ.get('BIGQUERY_TABLE_ID', 'Specified environment variable is not set.')
-    result = search_bq(table_id)
+    result = search_latest()
     message = make_slack_message(result)
     respond(message)
 
@@ -103,10 +86,9 @@ def entry_function(request: Request):
 
     if request_json and 'channel' in request_json:
         channel = request_json['channel']
-        table_id = os.environ.get('BIGQUERY_TABLE_ID', 'Specified environment variable is not set.')
         slack_api_token = os.environ.get('SLACK_BOT_TOKEN', 'Specified environment variable is not set.')
 
-        result = search_bq(table_id)
+        result = search_latest()
         message = make_slack_message(result)
 
         client = WebClient(token=slack_api_token)
@@ -114,4 +96,5 @@ def entry_function(request: Request):
         print(response)
         return ""
 
+    handler = SlackRequestHandler(app)
     return handler.handle(request)
