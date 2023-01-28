@@ -4,9 +4,62 @@ import os
 import functions_framework
 from google.cloud import bigquery
 from google.cloud import firestore
+from slack_sdk.web import WebClient
 
 
-def insert_bq(dt_now_iso, request_json):
+def send_slack_daytime(message: str):
+    # 10～21時代だけ通知する
+    jst = datetime.timezone(datetime.timedelta(hours=9), "JST")
+    now_hour = datetime.datetime.now(jst).hour
+    if now_hour < 9 & now_hour > 22:
+        return
+
+    slack_channel = os.environ.get('SLACK_CHANNEL', 'Specified environment variable is not set.')
+    slack_api_token = os.environ.get('SLACK_BOT_TOKEN', 'Specified environment variable is not set.')
+    client = WebClient(token=slack_api_token)
+    response = client.chat_postMessage(text=message, channel=slack_channel)
+    print(response)
+
+
+def warning_cold(temperature: float):
+    too_cold_temperature = 20
+
+    db = firestore.Client()
+    latest_ref = db.collection('room-monitor').document('warning')
+    latest_dic = latest_ref.get().to_dict()
+
+    # 寒すぎリセット
+    if temperature > too_cold_temperature + 3:
+        latest_ref.update(
+            {
+                'updated': firestore.SERVER_TIMESTAMP,
+                'temperature': temperature,
+                'too_cold': False,
+            }
+        )
+        return
+
+    # 寒すぎない
+    if temperature > too_cold_temperature:
+        return
+
+    # ずっと寒すぎ
+    if latest_dic['too_cold']:
+        return
+
+    # 寒すぎ
+    latest_ref.update(
+        {
+            'updated': firestore.SERVER_TIMESTAMP,
+            'temperature': temperature,
+            'too_cold': True,
+            'too_hot': False,
+        }
+    )
+    send_slack_daytime(f"${too_cold_temperature}度を下回りました :cold_face:")
+
+
+def insert_bq(dt_now_iso, request_json) -> bool:
     rows_to_insert = [{
         'createdAt': dt_now_iso,
         'temperature': request_json['temperature'],  # 温度(℃)
@@ -51,6 +104,7 @@ def register_monitoring_data(request):
 
     if insert_bq(dt_now_iso, request_json):
         update_latest_fs(dt_now, request_json)
+        warning_cold(request_json['temperature'])
         return 'OK {}'.format(dt_now_iso)
 
     return 'NG {}'.format(dt_now_iso)

@@ -1,3 +1,4 @@
 functions-framework==3.*
 google-cloud-bigquery==3.3.2
 google-cloud-firestore==2.5.3
+slack-sdk==3.18.*
