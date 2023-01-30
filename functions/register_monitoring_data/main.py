@@ -7,13 +7,7 @@ from google.cloud import firestore
 from slack_sdk.web import WebClient
 
 
-def send_slack_daytime(message: str):
-    # 10～21時代だけ通知する
-    jst = datetime.timezone(datetime.timedelta(hours=9), "JST")
-    now_hour = datetime.datetime.now(jst).hour
-    if now_hour < 9 & now_hour > 22:
-        return
-
+def send_slack(message: str):
     slack_channel = os.environ.get('SLACK_CHANNEL', 'Specified environment variable is not set.')
     slack_api_token = os.environ.get('SLACK_BOT_TOKEN', 'Specified environment variable is not set.')
     client = WebClient(token=slack_api_token)
@@ -56,7 +50,7 @@ def warning_cold(temperature: float):
             'too_hot': False,
         }
     )
-    send_slack_daytime(f"{too_cold_temperature}度を下回りました :cold_face:")
+    send_slack(f"{too_cold_temperature}度を下回りました :cold_face:")
 
 
 def warning_hot(temperature: float):
@@ -94,7 +88,7 @@ def warning_hot(temperature: float):
             'too_hot': True,
         }
     )
-    send_slack_daytime(f"{too_hot_temperature}度を上回りました :hot_face:")
+    send_slack(f"{too_hot_temperature}度を上回りました :hot_face:")
 
 
 def insert_bq(dt_now_iso, request_json) -> bool:
@@ -142,8 +136,15 @@ def register_monitoring_data(request):
 
     if insert_bq(dt_now_iso, request_json):
         update_latest_fs(dt_now, request_json)
+
+        # 10～21時代だけ暑すぎ・寒すぎ警告する
+        jst = datetime.timezone(datetime.timedelta(hours=9), "JST")
+        now_hour = datetime.datetime.now(jst).hour
+        if 0 < now_hour < 9 or 22 < now_hour:
+            return
         warning_cold(request_json['temperature'])
         warning_hot(request_json['temperature'])
+
         return 'OK {}'.format(dt_now_iso)
 
     return 'NG {}'.format(dt_now_iso)
