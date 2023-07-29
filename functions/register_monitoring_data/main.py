@@ -115,12 +115,17 @@ def insert_bq(dt_now_iso, request_json) -> bool:
 def update_latest_fs(dt_now_iso, request_json):
     db = firestore.Client()
     latest_data = db.collection('room-monitor').document('latest')
+
+    # 補正
+    temperature = request_json['temperature'] - 4  # 温度(*C)
+    humidity = request_json['humidity'] - 5  # 湿度(%)
+
     latest_data.update(
         {
             'createdAt': dt_now_iso,
-            'temperature': request_json['temperature'],  # 温度(*C)
-            'pressure': request_json['pressure'],  # 気圧(hPa)
-            'humidity': request_json['humidity'],  # 湿度(%)
+            'temperature': temperature,
+            'pressure': request_json['pressure'],  # 気圧(hPa),
+            'humidity': humidity,
             'gas_resistance': request_json['gas_resistance'],  # (KOhms)
             'elevation': request_json['elevation']  # 標高(m)
         }
